@@ -48,7 +48,7 @@ def inverse_mujoco_transform(pos, vel, acc):
 logger = setup_logger(__name__,level="DEBUG")
 
 class Args(BaseModel):
-    random_seed: List[int] = [12]
+    random_seed: List[int] = [14]
     """the random seed for the simulation"""
     batch_number: int = 2
     """the number of trajectory to generate"""
@@ -74,7 +74,7 @@ class Args(BaseModel):
     """the length of the catalog to use"""
     simulation_mode: str = "mixed" 
     """ Data collected from real pendulum """
-    real_trajectory_data_csv: str = 'example/compiled.csv' 
+    real_trajectory_data_csv: str = 'example/compiled_monotonous.csv' 
 
 def extract_trajectory(df):
     """ Extracts a trajectory out of a dataframe (df) """
@@ -87,7 +87,26 @@ def extract_trajectory(df):
     simulation_qpos_t = df[['shoulder_qpos', 'elbow_qpos']].to_numpy()
     simulation_qvel_t = df[['shoulder_qvel', 'elbow_qvel']].to_numpy()
     t = df['time'].to_numpy()
+
+    print(simulation_qvel_t.shape, t.shape)
+    
     simulation_qacc_t = np.gradient(simulation_qvel_t, t, axis=0, edge_order=1)
+    
+    reset_before = np.where(t[1:] // 5 != t[:-1] // 5)[0]
+    trial_starts = np.concatenate(([0], reset_before + 1))  
+
+    print("QACC QACC")
+    simulation_qacc_t[reset_before] = 0
+    simulation_qacc_t[trial_starts] = 0
+    
+    plt.clf()
+    plt.plot(simulation_qacc_t)
+    for rb in reset_before:
+        plt.axvline(x = rb, color='red', linestyle='--')
+    for ts in trial_starts:
+        plt.axvline(x = ts, color='green', linestyle='--')
+    # plt.scatter(trial_starts, simulation_qacc_t[trial_starts], color='green')
+    plt.savefig(F"acceleration_test{time.time()}_.png")
     force_vector_t    = df[['shoulder_effort', 'elbow_effort']].to_numpy()
 
     
@@ -145,9 +164,9 @@ def main(args: Args):
     df = pd.read_csv(args.real_trajectory_data_csv)
     t = df['time'].to_numpy()
     # indices i where reset happens between i and i+1
-    reset_before = np.where(t[1:] < t[:-1])[0]
+    reset_before = np.where(t[1:] // 5 != t[:-1] // 5)[0]
     trial_starts = np.concatenate(([0], reset_before + 1))    
-
+    print("TRIAL STARTS", trial_starts)
     rng = np.random.default_rng(args.random_seed)
 
     k = rng.integers(0, len(trial_starts))
@@ -241,9 +260,21 @@ def main(args: Args):
 
     start_time = time.perf_counter()
 
-    pre_knowledge_indices = np.nonzero(args.forces_scale_vector)[0] + catalog.starting_index_by_type("ExternalForces")
     pre_knowledge_mask = np.zeros((catalog.catalog_length,))
-    pre_knowledge_mask[pre_knowledge_indices] = 1.0
+
+    # protect external torques
+    force_indices = (
+        np.nonzero(args.forces_scale_vector)[0]
+        + catalog.starting_index_by_type("ExternalForces")
+    )
+    pre_knowledge_mask[force_indices] = 1.0
+
+    # protect inertia terms (qdd)
+    labels = catalog.label()
+    qdd_indices = [i for i, lbl in enumerate(labels) if "qdd_" in lbl]
+
+    pre_knowledge_mask[qdd_indices] = 1.0
+
 
     print("SHAPES:", simulation_qpos_t.shape, simulation_qvel_t.shape, simulation_qacc_t.shape)
 
@@ -284,7 +315,7 @@ def main(args: Args):
 
     # Use the result to generate validation trajectory
 
-    threshold = 1e-2  # Adjust threshold value as needed
+    threshold = 0  # Adjust threshold value as needed
     norm = np.linalg.norm(solution)
     if norm > 0:
         solution = np.where(np.abs(solution)/norm < threshold, 0, solution)
@@ -321,6 +352,18 @@ def main(args: Args):
     simulation_qacc_v, 
     force_vector_v,
     _) = extract_trajectory(df_test)
+    pd.DataFrame(data={
+        'time': simulation_time_v[:, 0],
+        'qpos0': simulation_qpos_v[:, 0],
+        'qpos1': simulation_qpos_v[:, 1],
+        'qvel0': simulation_qvel_v[:, 0],
+        'qvel1': simulation_qvel_v[:, 1],
+        'qacc0': simulation_qacc_v[:, 0],
+        'qacc1': simulation_qacc_v[:, 1],
+        'force0': force_vector_v[:, 0],
+        'force1': force_vector_v[:, 1]
+    }).to_csv('example/irl_v_test.csv')
+
 
     print("""(simulation_time_v, 
 simulation_qpos_v, 
@@ -335,8 +378,8 @@ force_vector_v,)""", (simulation_time_v.shape,
     if valid_model:
         q0 = simulation_qpos_v[0]
         qd0 = simulation_qvel_v[0]
-        initial_position = [q0[0], qd0[0], q0[1], qd0[1]]
-
+        initial_position = [simulation_qpos_v[0, 0], simulation_qvel_v[0, 0], simulation_qpos_v[0, 1], simulation_qvel_v[0, 1]]
+        print("IP:", initial_position)
 
         (simulation_time_vs, 
          simulation_qpos_vs, 
@@ -359,9 +402,26 @@ force_vector_v,)""", (simulation_time_v.shape,
             # forces_time_series=simulation_time_v,
             # forces_values=force_vector_v,
          )
+        
+        print(simulation_time_vs.shape)
+        print(simulation_qpos_vs.shape)
+        print(simulation_qvel_vs.shape)
+        print(simulation_qacc_vs.shape)
+        print(force_vector_vs.shape)
+        pd.DataFrame(data={
+            'time': simulation_time_vs[:, 0],
+            'qpos0': simulation_qpos_vs[:, 0],
+            'qpos1': simulation_qpos_vs[:, 1],
+            'qvel0': simulation_qvel_vs[:, 0],
+            'qvel1': simulation_qvel_vs[:, 1],
+            'qacc0': simulation_qacc_vs[:, 0],
+            'qacc1': simulation_qacc_vs[:, 1],
+            'force0': force_vector_vs[:, 0],
+            'force1': force_vector_vs[:, 1]
+        }).to_csv('example/irl_vs_test.csv')
+        print("CSV created")
     else:
         logger.warning("Model is not valid, skipping validation trajectory generation")
-
 
     coeffs = np.array(solution)
 
@@ -378,27 +438,27 @@ force_vector_v,)""", (simulation_time_v.shape,
     fig.suptitle('Trajectory Comparison: Mujoco vs. Theoretical', fontsize=16)
 
     # --- 1. Plot Position Data ---
-    axes[0].plot(simulation_time_v, simulation_qpos_v, label='Mujoco Simulation')
+    axes[0].plot(simulation_time_v, simulation_qpos_v, label='Real Pendulum')
     if valid_model:
-        axes[0].plot(simulation_time_vs, simulation_qpos_vs, label='Theoretical Simulation', linestyle='--')
+        axes[0].plot(simulation_time_vs, simulation_qpos_vs, label='SINDy', linestyle='--')
     axes[0].set_title('Position vs. Time')
     axes[0].set_ylabel('Position')
     axes[0].legend()
     axes[0].grid(True)
 
     # --- 2. Plot Velocity Data ---
-    axes[1].plot(simulation_time_v, simulation_qvel_v, label='Mujoco Simulation')
+    axes[1].plot(simulation_time_v, simulation_qvel_v, label='Real Pendulum')
     if valid_model:
-        axes[1].plot(simulation_time_vs, simulation_qvel_vs, label='Theoretical Simulation', linestyle='--')
+        axes[1].plot(simulation_time_vs, simulation_qvel_vs, label='SINDy', linestyle='--')
     axes[1].set_title('Velocity vs. Time')
     axes[1].set_ylabel('Velocity')
     axes[1].legend()
     axes[1].grid(True)
 
     # --- 3. Plot Acceleration Data ---
-    axes[2].plot(simulation_time_v, simulation_qacc_v, label='Mujoco Simulation')
+    axes[2].plot(simulation_time_v, simulation_qacc_v, label='Real Pendulum')
     if valid_model:
-        axes[2].plot(simulation_time_vs, simulation_qacc_vs, label='Theoretical Simulation', linestyle='--')
+        axes[2].plot(simulation_time_vs, simulation_qacc_vs, label='SINDy', linestyle='--')
     axes[2].set_title('Acceleration vs. Time')
     axes[2].set_ylabel('Acceleration')
     axes[2].legend()
