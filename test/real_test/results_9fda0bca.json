@@ -1,0 +1,35 @@
+{
+  "random_seed": [
+    14
+  ],
+  "batch_number": 2,
+  "max_time": 10.0,
+  "initial_position": [
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "initial_condition_randomness": [
+    0.1
+  ],
+  "forces_scale_vector": [
+    1.0,
+    1.0
+  ],
+  "data_ratio": 20.0,
+  "validation_time": 5.0,
+  "noise_level": 0.0,
+  "experiment_system": "double_pendulum_pm",
+  "damping_coefficients": [
+    -1.5,
+    -1.5
+  ],
+  "catalog_lenght": 20,
+  "simulation_mode": "mixed",
+  "real_trajectory_data_csv": "example/compiled_monotonous.csv",
+  "error": NaN,
+  "max_validation_end_time": 0.019296954993721808,
+  "regression_time": 2.2204272999661043,
+  "valid_model": true
+}

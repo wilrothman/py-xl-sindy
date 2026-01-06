@@ -1,4 +1,4 @@
-#  uv run example/minimal_example_wil.py
+#  uv run example/minimal_example_real.py
 """
 VERIFIED FOR VERSION 2.1.3
 
@@ -48,7 +48,7 @@ def inverse_mujoco_transform(pos, vel, acc):
 logger = setup_logger(__name__,level="DEBUG")
 
 class Args(BaseModel):
-    random_seed: List[int] = [14]
+    random_seed: List[int] = [20]
     """the random seed for the simulation"""
     batch_number: int = 2
     """the number of trajectory to generate"""
@@ -89,25 +89,87 @@ def extract_trajectory(df):
     t = df['time'].to_numpy()
 
     print(simulation_qvel_t.shape, t.shape)
+
+    from scipy.signal import savgol_filter
+    # dt = 1e-2
+    w1 = simulation_time_t[:-1]
+    w2 = simulation_time_t[1:]
+    dt = np.median(w2 - w1)
+    print("dt =", dt)
     
-    simulation_qacc_t = np.gradient(simulation_qvel_t, t, axis=0, edge_order=1)
-    
+    ### TEST ###
+    # Velocity
+    qvel_npgradient = np.gradient(simulation_qpos_t, t, axis=0, edge_order=1)
+    qvel_from_qpos = savgol_filter(simulation_qpos_t, window_length=41, polyorder=3, deriv=1, delta=dt, axis=0)
+
+    plt.clf()
+    plt.plot(simulation_time_t, simulation_qvel_t, label="observed")
+    plt.plot(simulation_time_t, qvel_npgradient, label="from gradient")
+    plt.plot(simulation_time_t, qvel_from_qpos, label="from qpos")
+    plt.xlabel("Time")
+    plt.ylabel("Calculated Velocity")
+    plt.title(f"Testing Different Velocity Computations (seed = {args.random_seed[0]})")
+    plt.legend()
+    plt.savefig(f"test/accel_test/{args.random_seed[0]}-qvel.png")
+
+    # Acceleration
+    qacc_npgradient = np.gradient(simulation_qvel_t, t, axis=0, edge_order=1)
+    qacc_from_qpos = savgol_filter(simulation_qpos_t, window_length=41, polyorder=3, deriv=2, delta=dt, axis=0)
+    qacc_from_qvel = savgol_filter(simulation_qvel_t, window_length=41, polyorder=3, deriv=1, delta=dt, axis=0)
+    temp = qacc_from_qvel
+
+    plt.clf()
+    plt.plot(simulation_time_t, qacc_npgradient, label="from gradient")
+    plt.plot(simulation_time_t, qacc_from_qpos, label="from qpos")
+    plt.plot(simulation_time_t, qacc_from_qvel, label="from qvel")
+    force_vector_t    = df[['shoulder_effort', 'elbow_effort']].to_numpy()
+    vscale, hscale = -100, 1
+    plt.plot(hscale * simulation_time_t + ((hscale - 1) / 2), vscale * force_vector_t, label='from force', linestyle='--')
+    plt.xlabel("Time")
+    plt.ylabel("Calculated Acceleration")
+    plt.title(f"Testing Different Acceleration Computations (seed = {args.random_seed[0]})")
+    plt.legend()
+    plt.savefig(f"test/accel_test/{args.random_seed[0]}-qacc.png")
+
+    # Effort
+    plt.clf()
+    force_vector_t    = df[['shoulder_effort', 'elbow_effort']].to_numpy()
+    plt.plot(simulation_time_t, force_vector_t, label='from force', linestyle='--')
+    plt.xlabel("Time")
+    plt.ylabel("Calculated Force")
+    plt.title(f"Testing Different Force Computations (seed = {args.random_seed[0]})")
+    plt.legend()
+    plt.savefig(f"test/accel_test/{args.random_seed[0]}-force.png")
+
+    ### /TEST ###
+
+    t = simulation_time_t
     reset_before = np.where(t[1:] // 5 != t[:-1] // 5)[0]
     trial_starts = np.concatenate(([0], reset_before + 1))  
+    print("trial starts (extract_trajectory):", trial_starts)
 
-    print("QACC QACC")
-    simulation_qacc_t[reset_before] = 0
-    simulation_qacc_t[trial_starts] = 0
+    trial_endpoints = list(zip(
+        trial_starts,
+        list(trial_starts)[1:] + [len(t)]
+    ))
     
-    plt.clf()
-    plt.plot(simulation_qacc_t)
-    for rb in reset_before:
-        plt.axvline(x = rb, color='red', linestyle='--')
-    for ts in trial_starts:
-        plt.axvline(x = ts, color='green', linestyle='--')
-    # plt.scatter(trial_starts, simulation_qacc_t[trial_starts], color='green')
-    plt.savefig(F"acceleration_test{time.time()}_.png")
-    force_vector_t    = df[['shoulder_effort', 'elbow_effort']].to_numpy()
+    qaccs_from_qvel = np.zeros((0, 2))
+
+    for start, end in trial_endpoints:
+        qacc_from_qvel = savgol_filter(simulation_qvel_t[start : end], window_length=41, polyorder=3, deriv=1, delta=dt, axis=0)
+        print(qacc_from_qvel)
+        qaccs_from_qvel = np.vstack((qaccs_from_qvel, qacc_from_qvel))
+
+    print(qaccs_from_qvel.shape)
+    
+    print(np.min(qaccs_from_qvel, axis=0), np.max(qaccs_from_qvel, axis=0))
+    print(np.min(temp, axis=0), np.max(temp, axis=0))
+
+    simulation_qacc_t = qaccs_from_qvel
+
+    print(simulation_qvel_t.shape)
+    print(simulation_qacc_t.shape)
+
 
     
     return (simulation_time_t,  # (N, 1)
@@ -167,7 +229,6 @@ def main(args: Args):
     reset_before = np.where(t[1:] // 5 != t[:-1] // 5)[0]
     trial_starts = np.concatenate(([0], reset_before + 1))    
     print("TRIAL STARTS", trial_starts)
-    rng = np.random.default_rng(args.random_seed)
 
     k = rng.integers(0, len(trial_starts))
     start = int(trial_starts[k])
@@ -175,6 +236,7 @@ def main(args: Args):
 
     df_train = pd.concat([df.iloc[:start], df.iloc[end:]], axis=0).reset_index(drop=True)
     df_test = df.iloc[start:end].reset_index(drop=True)
+    df_test['time'] -= np.min(df_test['time'])
 
 
 
@@ -260,23 +322,16 @@ def main(args: Args):
 
     start_time = time.perf_counter()
 
+
+    pre_knowledge_indices = np.nonzero(args.forces_scale_vector)[0] + catalog.starting_index_by_type("ExternalForces")
     pre_knowledge_mask = np.zeros((catalog.catalog_length,))
+    pre_knowledge_mask[pre_knowledge_indices] = 1.0
 
-    # protect external torques
-    force_indices = (
-        np.nonzero(args.forces_scale_vector)[0]
-        + catalog.starting_index_by_type("ExternalForces")
-    )
-    pre_knowledge_mask[force_indices] = 1.0
-
-    # protect inertia terms (qdd)
     labels = catalog.label()
     qdd_indices = [i for i, lbl in enumerate(labels) if "qdd_" in lbl]
 
     pre_knowledge_mask[qdd_indices] = 1.0
 
-
-    print("SHAPES:", simulation_qpos_t.shape, simulation_qvel_t.shape, simulation_qacc_t.shape)
 
     solution, exp_matrix = xlsindy.simulation.regression_mixed(
         theta_values=simulation_qpos_t,
@@ -290,21 +345,21 @@ def main(args: Args):
         pre_knowledge_mask=pre_knowledge_mask,
     )
 
-    labels = catalog.label()
-    qdd_rows = np.array(["qdd_" in lbl for lbl in labels])
+    # labels = catalog.label()
+    # qdd_rows = np.array(["qdd_" in lbl for lbl in labels])
 
-    threshold_qdd = 1e-4        # KEEP inertia
-    threshold_other = 1e-2     # SPARSIFY everything else
+    # threshold_qdd = 1e-4        # KEEP inertia
+    # threshold_other = 1e-2     # SPARSIFY everything else
 
-    solution_new = solution.copy()
-    norm = np.linalg.norm(solution)
+    # solution_new = solution.copy()
+    # norm = np.linalg.norm(solution)
 
-    for i in range(solution.shape[0]):
-        thresh = threshold_qdd if qdd_rows[i] else threshold_other
-        if np.abs(solution[i]) / norm < thresh:
-            solution_new[i] = 0.0
+    # for i in range(solution.shape[0]):
+    #     thresh = threshold_qdd if qdd_rows[i] else threshold_other
+    #     if np.abs(solution[i]) / norm < thresh:
+    #         solution_new[i] = 0.0
 
-    print(f"SOL change: {solution} -> {solution_new}")
+    # print(f"SOL change: {solution} -> {solution_new}")
     # solution = solution_new
 
     end_time = time.perf_counter()
@@ -314,11 +369,12 @@ def main(args: Args):
     logger.info(f"Regression completed in {end_time - start_time:.2f} seconds")
 
     # Use the result to generate validation trajectory
+    threshold = 0 # Adjust threshold value as needed
+    solution = np.where(np.abs(solution)/np.linalg.norm(solution) < threshold, 0, solution)
 
-    threshold = 0  # Adjust threshold value as needed
-    norm = np.linalg.norm(solution)
-    if norm > 0:
-        solution = np.where(np.abs(solution)/norm < threshold, 0, solution)
+    # norm = np.linalg.norm(solution)
+    # if norm > 0:
+    #     solution = np.where(np.abs(solution)/norm < threshold, 0, solution)
     # else: keep it as-is; it's already zero
 
     print("solution norm:", np.linalg.norm(solution))
@@ -365,15 +421,15 @@ def main(args: Args):
     }).to_csv('example/irl_v_test.csv')
 
 
-    print("""(simulation_time_v, 
-simulation_qpos_v, 
-simulation_qvel_v, 
-simulation_qacc_v, 
-force_vector_v,)""", (simulation_time_v.shape, 
-    simulation_qpos_v.shape, 
-    simulation_qvel_v.shape, 
-    simulation_qacc_v.shape, 
-    force_vector_v.shape,))
+#     print("""(simulation_time_v, 
+# simulation_qpos_v, 
+# simulation_qvel_v, 
+# simulation_qacc_v, 
+# force_vector_v,)""", (simulation_time_v.shape, 
+#     simulation_qpos_v.shape, 
+#     simulation_qvel_v.shape, 
+#     simulation_qacc_v.shape, 
+#     force_vector_v.shape,))
 
     if valid_model:
         q0 = simulation_qpos_v[0]
@@ -398,9 +454,6 @@ force_vector_v,)""", (simulation_time_v.shape,
              time_sym,
              symbols_matrix,
              args.forces_scale_vector,
-            # args.forces_scale_vector,            # can be ignored now
-            # forces_time_series=simulation_time_v,
-            # forces_values=force_vector_v,
          )
         
         print(simulation_time_vs.shape)

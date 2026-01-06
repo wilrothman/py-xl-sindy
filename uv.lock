@@ -3115,13 +3115,16 @@ dependencies = [
     { name = "cvxpy" },
     { name = "jax" },
     { name = "matplotlib" },
+    { name = "mujoco" },
     { name = "networkx" },
     { name = "numpy" },
+    { name = "pandas" },
     { name = "pydantic" },
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "sympy" },
     { name = "tqdm" },
+    { name = "tyro" },
 ]
 
 [package.optional-dependencies]
@@ -3167,9 +3170,11 @@ requires-dist = [
     { name = "jax", specifier = ">=0.5.3" },
     { name = "jax", extras = ["cuda12"], marker = "extra == 'gpu'", specifier = ">=0.5.3" },
     { name = "matplotlib", specifier = ">=3.10.6" },
+    { name = "mujoco", specifier = ">=3.4.0" },
     { name = "networkx", specifier = ">=3.4.2" },
     { name = "numpy", specifier = ">=1.26.4" },
     { name = "nx-cugraph-cu12", marker = "extra == 'gpu'", specifier = ">=24.4.0" },
+    { name = "pandas", specifier = ">=2.3.3" },
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pylibraft-cu12", marker = "extra == 'gpu'", specifier = ">=24.4.0" },
     { name = "raft-dask-cu12", marker = "extra == 'gpu'", specifier = ">=24.4.0" },
@@ -3177,6 +3182,7 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.15.3" },
     { name = "sympy", specifier = ">=1.14.0" },
     { name = "tqdm", specifier = ">=4.67.1" },
+    { name = "tyro", specifier = ">=1.0.0" },
 ]
 provides-extras = ["gpu"]
 

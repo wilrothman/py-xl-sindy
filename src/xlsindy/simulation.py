@@ -497,7 +497,7 @@ def regression_mixed(
         activated_function = remaining_catalog(
             experimental_matrix,
             activated_coordinate,
-            num_coordinates=num_coordinates,
+            num_coordinate=num_coordinates,
         )
 
     if activated_coordinate.sum() < num_coordinates:

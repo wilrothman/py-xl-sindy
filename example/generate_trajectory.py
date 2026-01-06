@@ -87,7 +87,7 @@ def generate_theoretical_trajectory(
     symbols_matrix,
     time_symb,
     lambdify_module="numpy"
-    )
+    ) # ISSUE: THIS IS A REDUNDANT FUNCTION CALL
     
     for i in tqdm(range(batch_number),desc="Generating batches", unit="batch"):
 
@@ -125,6 +125,7 @@ def generate_theoretical_trajectory(
         simulation_qpos_m = phase_values[:, ::2]
         simulation_qvel_m = phase_values[:, 1::2]
 
+        t = simulation_time_m.flatten() # FIXED(?)
         simulation_qacc_m = np.gradient(simulation_qvel_m, simulation_time_m, axis=0, edge_order=1)
 
         force_vector_m = forces_function(simulation_time_m.T).T
@@ -133,6 +134,7 @@ def generate_theoretical_trajectory(
             simulation_time_m += np.max(simulation_time_g)
 
         # Concatenate the data
+        print("DEBUG GEN TRAJECTORY:", simulation_time_g.shape, simulation_time_m.shape)
         simulation_time_g = np.concatenate((simulation_time_g, simulation_time_m.reshape(-1, 1)), axis=0)
         simulation_qpos_g = np.concatenate((simulation_qpos_g, simulation_qpos_m), axis=0)
         simulation_qvel_g = np.concatenate((simulation_qvel_g, simulation_qvel_m), axis=0)
